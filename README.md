@@ -15,6 +15,8 @@ Analizar los factores asociados con la elección entre transporte colectivo e in
 
 ## Ejecución
 
+Consulta el [dashboard de Streamlit](dashboard_movilidad/README.md) para explorar la Entrega 3 y conocer las instrucciones de ejecución y despliegue.
+
 1. Abrir `entrega_1.ipynb` en Google Colab.
 2. Ejecutar las celdas en orden.
 3. El notebook descarga automáticamente los datos oficiales necesarios.
