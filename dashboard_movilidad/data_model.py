@@ -21,6 +21,7 @@ NUMERIC = {
     "es_individual": "Viaje individual",
 }
 MIN_CELL = 20
+PUBLIC_FILTERS = ("estrato_grupo", "tiene_auto")
 
 
 def load_trips(directory):
@@ -61,6 +62,17 @@ def counts(trips, field):
             .rename("viajes").reset_index().rename(columns={f"label_{field}": "categoria"}))
 
 
+def class_counts(frame):
+    groups = frame.groupby("es_individual")
+    return (groups.viajes.sum() if "viajes" in frame else groups.size()).reindex([0, 1], fill_value=0)
+
+
+def cross_counts(frame, first, second):
+    columns = [f"label_{first}", f"label_{second}", "es_individual"]
+    groups = frame.groupby(columns, as_index=False)
+    return groups.viajes.sum() if "viajes" in frame else groups.size().rename(columns={"size": "viajes"})
+
+
 def correlations(trips):
     return trips[list(NUMERIC)].rename(columns=NUMERIC).corr(min_periods=MIN_CELL).round(2)
 
@@ -79,9 +91,16 @@ def export_public(directory):
         protected = table.pivot(index="categoria", columns="es_individual", values="viajes")
         if protected.fillna(0).min().min() >= MIN_CELL:
             frames.append(table.assign(variable=field))
+    cube = cross_counts(trips, *PUBLIC_FILTERS)
+    cells = cube.pivot(index=[f"label_{field}" for field in PUBLIC_FILTERS],
+                       columns="es_individual", values="viajes").reindex(columns=[0, 1])
+    if cells.fillna(0).lt(MIN_CELL).any().any():
+        raise ValueError("El cruce público contiene celdas inferiores al umbral de publicación.")
+
     PUBLIC.mkdir(exist_ok=True)
     pd.concat(frames, ignore_index=True).to_parquet(PUBLIC / "distribuciones.parquet", index=False)
     correlations(trips).to_csv(PUBLIC / "correlacion.csv")
+    cube.to_parquet(PUBLIC / "cruce_estrato_auto.parquet", index=False)
 
 
 if __name__ == "__main__":
