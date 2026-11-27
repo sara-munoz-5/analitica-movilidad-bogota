@@ -1,0 +1,9 @@
+,Edad,Etapas,Automóvil,Motocicleta,Bicicleta,Licencia auto,Licencia moto,Viaje individual
+Edad,1.0,-0.04,0.11,-0.14,-0.04,0.1,-0.17,0.11
+Etapas,-0.04,1.0,-0.16,-0.05,-0.0,-0.16,-0.09,-0.3
+Automóvil,0.11,-0.16,1.0,-0.04,0.05,0.6,-0.0,0.46
+Motocicleta,-0.14,-0.05,-0.04,1.0,0.02,0.0,0.58,0.26
+Bicicleta,-0.04,-0.0,0.05,0.02,1.0,0.05,0.02,0.0
+Licencia auto,0.1,-0.16,0.6,0.0,0.05,1.0,0.12,0.44
+Licencia moto,-0.17,-0.09,-0.0,0.58,0.02,0.12,1.0,0.34
+Viaje individual,0.11,-0.3,0.46,0.26,0.0,0.44,0.34,1.0
