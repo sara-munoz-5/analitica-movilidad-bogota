@@ -6,12 +6,6 @@ Proyecto académico de Analítica de Datos basado en la Encuesta de Movilidad de
 
 Analizar los factores asociados con la elección entre transporte colectivo e individual motorizado, con el fin de identificar patrones útiles para el contexto comercial de DiDi.
 
-## Contenido
-
-- **Sección 1–4:** carga, integración, construcción del dataset y evaluación de calidad.
-- **Sección 5:** limpieza, selección de características y preparación de transformaciones.
-- **Sección 6:** análisis exploratorio, visualizaciones y contraste de hipótesis.
-- **Sección 7:** modelado predictivo y evaluación (pendiente de integración).
 
 ## Ejecución
 
