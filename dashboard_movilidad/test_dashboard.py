@@ -5,10 +5,35 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 from data_model import FIELDS, MIN_CELL, PUBLIC, PUBLIC_FILTERS, ROOT, class_counts
-from prediction import FEATURES, age_band
+from prediction import FEATURES, age_band, infer
 
 
 class DashboardTests(unittest.TestCase):
+    def test_pipeline_classifies_transport_type(self):
+        class FakePipeline:
+            classes_ = [0, 1]
+
+            def predict_proba(self, row):
+                self.row = row
+                return [[0.25, 0.75]]
+
+        values = {
+            "estrato_grupo": "Bajo (1-2)", "ingreso_grupo": "1. Hasta $1,16 M",
+            "localidad": "Bosa", "rango_edad": "26-35", "sexo": "Hombre",
+            "nivel_educativo": "4. Universitario", "ocupacion": "Empleado",
+            "motivo_grupo": "Trabajo", "franja": "2. Pico AM (5-9 h)",
+            "edad": 35, "num_etapas": 1, "tiene_auto": 1, "tiene_moto": 0,
+            "tiene_bici": 0, "licencia_auto": 1, "licencia_moto": 0,
+            "celular_datos": 1,
+        }
+        categories = {field: (value,) for field, value in values.items()
+                      if field in {"estrato_grupo", "ingreso_grupo", "localidad", "rango_edad",
+                                   "sexo", "nivel_educativo", "ocupacion", "motivo_grupo", "franja"}}
+        label, probability, individual = infer(FakePipeline(), values, categories)
+        self.assertEqual(label, 1)
+        self.assertEqual(probability, 0.75)
+        self.assertEqual(individual, 0.75)
+
     def test_public_counts(self):
         data = pd.read_parquet(PUBLIC / "distribuciones.parquet")
         self.assertEqual(set(data.columns), {"variable", "categoria", "es_individual", "viajes"})

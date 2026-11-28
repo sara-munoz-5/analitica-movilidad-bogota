@@ -11,10 +11,10 @@ from data_model import (
     FIELDS, MIN_CELL, PUBLIC, PUBLIC_FILTERS, ROOT, class_counts, correlations,
     counts, cross_counts, load_trips,
 )
-from prediction import prediction_page
+from prediction import CLASS_LABELS, prediction_page
 
 ASSETS = ROOT / "assets"
-CLASSES = {0: "Colectivo", 1: "Individual motorizado"}
+CLASSES = CLASS_LABELS
 COLORS = {"Colectivo": "#384252", "Individual motorizado": "#e95813"}
 PAGES = [
     "Resumen ejecutivo", "Modelo de datos", "Análisis exploratorio",

@@ -50,6 +50,7 @@ FEATURES = (*CATEGORIES, "edad", "num_etapas", *BINARY)
 ARTIFACT = "random_forest.joblib"
 MANIFEST = "entorno.json"
 RUNTIME_PACKAGES = ("scikit-learn", "numpy", "scipy", "pandas", "joblib")
+CLASS_LABELS = {0: "Colectivo", 1: "Individual motorizado"}
 
 
 def age_band(age):
@@ -108,18 +109,32 @@ def infer(pipeline, values, categories):
     return selected, float(probabilities[selected]), individual
 
 
+def model_directory():
+    """Return the configured model folder, if a complete export is available."""
+    if "MOVILIDAD_MODELO_DIR" in os.environ:
+        configured = os.environ["MOVILIDAD_MODELO_DIR"]
+        if not configured:
+            return None
+        directory = Path(configured)
+    else:
+        directory = Path(__file__).parent / "modelo"
+    if not (directory / ARTIFACT).is_file() or not (directory / MANIFEST).is_file():
+        return None
+    return directory
+
+
 def prediction_page():
     st.subheader("¿Qué tipo de transporte estima el modelo?")
     st.caption("La probabilidad corresponde al tipo de transporte. El número de etapas "
                "debe conocerse para interpretar el resultado como una estimación previa al viaje.")
     pipeline = None
     options = {field: values for field, (_, values) in CATEGORIES.items()}
-    configured = os.environ.get("MOVILIDAD_MODELO_DIR")
-    if not configured:
-        st.info("Formulario disponible. Para calcular, configura MOVILIDAD_MODELO_DIR "
-                "con random_forest.joblib y entorno.json exportados desde Colab.")
+    directory = model_directory()
+    if directory is None:
+        st.info("Formulario disponible. Para calcular, agrega el pipeline exportado en "
+                "la carpeta modelo/ o configura MOVILIDAD_MODELO_DIR con "
+                "random_forest.joblib y entorno.json.")
     else:
-        directory = Path(configured)
         try:
             pipeline, options = load_pipeline(directory, (directory / ARTIFACT).stat().st_mtime_ns,
                                               (directory / MANIFEST).stat().st_mtime_ns)
@@ -150,7 +165,7 @@ def prediction_page():
         try:
             label, probability, individual = infer(pipeline, values, options)
             left, right = st.columns(2)
-            left.metric("Clase estimada", ("Colectivo", "Individual motorizado")[label], border=True)
+            left.metric("Clase estimada", CLASS_LABELS[label], border=True)
             right.metric("Probabilidad de la clase", f"{probability:.1%}".replace(".", ","), border=True)
             st.caption(f"Probabilidad de individual motorizado: {individual:.1%} · Umbral: 0,50.")
         except (ValueError, TypeError, RuntimeError) as exc:
