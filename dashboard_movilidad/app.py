@@ -18,7 +18,7 @@ CLASSES = CLASS_LABELS
 COLORS = {"Colectivo": "#384252", "Individual motorizado": "#e95813"}
 PAGES = [
     "Resumen ejecutivo", "Modelo de datos", "Análisis exploratorio",
-    "Evaluación de modelos", "Hallazgos para DiDi", "Predicción interactiva",
+    "Evaluación de modelos", "Oportunidades comerciales para DiDi", "Predicción interactiva",
 ]
 # Tabla de MLflow guardada en la sección 6.1 del notebook Entrega_3.ipynb.
 METRICS = pd.DataFrame(
@@ -67,6 +67,12 @@ def show_chart(figure, height=390, filename="movilidad-bogota"):
         "displaylogo": False, "displayModeBar": True,
         "toImageButtonOptions": {"format": "svg", "filename": filename},
     })
+
+
+def download_table(frame, filename, label="Descargar resumen CSV"):
+    """Descarga un agregado ya publicado, sin exponer registros individuales."""
+    st.download_button(label, frame.to_csv(index=False).encode("utf-8"), filename,
+                       "text/csv", icon=":material/download:")
 
 
 def split_chart(table, field, proportion):
@@ -264,12 +270,22 @@ def cross_chart(frame, fields):
 def exploration(frame, table, matrix, filtered):
     local = "viajes" not in frame
     fields = list(FIELDS if local or not filtered else PUBLIC_FILTERS)
+    total = class_counts(frame)
+    with st.container(border=True):
+        cards = st.columns(3)
+        cards[0].metric("Viajes en la seleccion", number(total.sum()))
+        cards[1].metric("Individual motorizado", percent(total.get(1, 0) / total.sum()))
+        cards[2].metric("Alcance de la evidencia", "Encuesta, no demanda DiDi")
+        st.caption("Estos indicadores describen la muestra seleccionada. No son usuarios, solicitudes ni conversiones de DiDi.")
     tabs = st.tabs(["Perfiles", "Comparar segmentos", "Cruzar variables", "Correlación"])
     with tabs[0]:
         st.subheader("¿Cómo varía la elección de transporte?")
         if not local and filtered:
             st.caption("Con filtros globales activos se muestran las variables del cruce publicado.")
         distributions(frame, table, fields)
+        if table is not None:
+            public_summary = table.assign(Transporte=table.es_individual.map(CLASSES))
+            download_table(public_summary, "resumen_distribucion_transporte.csv")
     with tabs[1]:
         segment_comparison(frame, list(FIELDS if local else PUBLIC_FILTERS))
     with tabs[2]:
@@ -326,7 +342,7 @@ def evaluation():
                 "La curva precisión-recall permite evaluar ese intercambio antes de elegir un umbral para un piloto.")
 
 
-def findings():
+def legacy_findings():
     chart, notes = st.columns([1.35, 1])
     with chart:
         show_asset("importancia_rf.png", "Importancia por reducción de impureza · Entrega 3 / MLflow")
@@ -345,6 +361,147 @@ def findings():
                 "usando un grupo de comparación para medir el efecto de la campaña.")
     with st.expander("Modelo de referencia · regresión logística"):
         show_asset("importancia_rl.png", "Coeficientes de regresión logística · Entrega 3 / MLflow")
+
+
+def share_table(table, field):
+    """Calcula participaciones desde agregados publicados, no desde filas individuales."""
+    data = table.loc[table.variable.eq(field)].copy()
+    pivot = data.pivot_table(index="categoria", columns="es_individual", values="viajes", aggfunc="sum")
+    pivot = pivot.reindex(columns=[0, 1], fill_value=0).fillna(0)
+    pivot["total"] = pivot.sum(axis=1)
+    pivot["share_individual"] = pivot[1].div(pivot["total"].where(pivot["total"].ne(0)))
+    return pivot.reset_index()
+
+
+def best_category(table, field, contains=None):
+    data = share_table(table, field)
+    if contains:
+        data = data[data.categoria.astype(str).str.contains(contains, case=False, na=False, regex=True)]
+    data = data.dropna(subset=["share_individual"])
+    return None if data.empty else data.sort_values("share_individual", ascending=False).iloc[0]
+
+
+def opportunity_card(title, evidence, hypothesis, validation):
+    with st.container(border=True):
+        st.subheader(title)
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**Evidencia observada**")
+            st.write(evidence)
+            st.markdown("**Hipotesis comercial**")
+            st.write(hypothesis)
+        with right:
+            st.markdown("**Propuesta de validacion**")
+            st.write(validation)
+
+
+def commercial_opportunities(frame, table, matrix):
+    st.info("El transporte individual motorizado incluye automovil particular, motocicleta, taxi y plataformas. "
+            "Esta pagina identifica patrones de movilidad, pero no estima usuarios ni demanda de DiDi.")
+    if table is None:
+        table = pd.concat([counts(frame, field).assign(variable=field) for field in FIELDS], ignore_index=True)
+    explorer_table = table
+    public_total = table.loc[table.variable.eq(PUBLIC_FILTERS[0]), "viajes"].sum()
+    if "viajes" in frame and frame.viajes.sum() < public_total:
+        explorer_table = pd.concat(
+            [profile_counts(frame, field).assign(variable=field) for field in PUBLIC_FILTERS],
+            ignore_index=True,
+        )
+        st.caption("Con filtros publicos activos, el explorador se limita a estrato y tenencia de automovil, que son los agregados disponibles para esa seleccion.")
+    available = set(explorer_table.variable)
+    st.subheader("Explorador de oportunidades")
+    st.caption("Explora categorias agregadas de la encuesta. Las comparaciones publicas respetan el umbral de "
+               f"{MIN_CELL} viajes por celda y no permiten reconstruir registros individuales.")
+    selectable = [field for field in FIELDS if field in available]
+    field = st.selectbox("Pregunta comercial", selectable, format_func=FIELDS.get, key="opportunity_field")
+    data = share_table(explorer_table, field)
+    visible = st.multiselect("Categorias a comparar", data.categoria.tolist(),
+                             default=data.categoria.tolist()[:6], key=f"opportunity_categories_{field}")
+    selected = data[data.categoria.isin(visible)].copy()
+    if selected.empty:
+        st.info("Selecciona al menos una categoria para comparar.")
+    else:
+        selected["Colectivo"] = selected[0].div(selected["total"])
+        selected["Individual motorizado"] = selected["share_individual"]
+        chart_data = selected.melt(id_vars="categoria", value_vars=["Colectivo", "Individual motorizado"],
+                                   var_name="Transporte", value_name="Proporcion")
+        chart = px.bar(chart_data, x="Proporcion", y="categoria", color="Transporte", barmode="stack",
+                       orientation="h", text_auto=".1%", color_discrete_map=COLORS,
+                       labels={"categoria": "", "Proporcion": "Participacion"})
+        chart.update_xaxes(range=[0, 1], tickformat=".0%")
+        chart.update_yaxes(autorange="reversed")
+        show_chart(chart, max(360, 30 * len(selected) + 130), "oportunidades-comerciales")
+        download_table(selected[["categoria", 0, 1, "total", "share_individual"]],
+                       f"oportunidades_{field}.csv")
+    st.caption("Participacion dentro de cada categoria de la encuesta. No equivale a probabilidad de usar DiDi.")
+
+    st.subheader("Hipotesis respaldadas por la evidencia disponible")
+    auto = best_category(table, "tiene_auto", "^No$")
+    auto_yes = best_category(table, "tiene_auto", "^S")
+    motive = best_category(table, "motivo_grupo")
+    time = best_category(table, "franja")
+    locality = best_category(table, "localidad")
+    cards = st.tabs(["Sin auto", "Multiples etapas", "Motivos", "Franja", "Localidad"])
+    with cards[0]:
+        if auto is not None and auto_yes is not None:
+            opportunity_card(
+                "Movilidad individual ocasional en hogares sin automovil",
+                f"En la encuesta, los viajes individuales representan {percent(auto.share_individual)} en hogares sin auto, frente a {percent(auto_yes.share_individual)} en hogares con auto.",
+                "Los hogares sin auto podrian tener necesidades puntuales de transporte individual, sin que eso implique que ya sean usuarios de DiDi.",
+                "Medir solicitudes nuevas y recurrentes por tenencia de auto, origen-destino, hora, motivo y tarifa; comparar con hogares con auto.")
+        else:
+            st.info("No hay suficiente agregado publico para esta oportunidad.")
+    with cards[1]:
+        corr = matrix.at["Etapas", "Viaje individual"] if matrix is not None and "Etapas" in matrix.index else None
+        evidence = (f"La correlacion publicada entre numero de etapas y viaje individual es {corr:.2f}; la asociacion es descriptiva y no prueba causalidad." if corr is not None else "El numero de etapas no esta publicado como distribucion publica; solo puede revisarse internamente.")
+        opportunity_card("Viajes colectivos con multiples etapas", evidence,
+                         "Los trayectos con transbordos podrian revelar necesidades de conexion o ultima milla.",
+                         "Usar datos de rutas, tiempos, solicitudes y abandono para medir si una oferta de conexion reduce friccion o aumenta viajes completados.")
+    with cards[2]:
+        if motive is not None:
+            opportunity_card(f"Necesidad asociada al motivo: {motive.categoria}",
+                             f"Es la categoria de motivo con mayor participacion individual observada: {percent(motive.share_individual)}.",
+                             "El motivo puede ayudar a priorizar mensajes y momentos de servicio, pero no identifica por si solo la intencion de compra.",
+                             "Contrastar motivo declarado con busquedas, solicitudes, conversion, hora y distancia en una prueba controlada.")
+    with cards[3]:
+        if time is not None:
+            opportunity_card(f"Ventana horaria: {time.categoria}",
+                             f"Es la franja con mayor participacion individual observada: {percent(time.share_individual)}.",
+                             "La franja podria orientar cobertura o comunicacion, sin asumir que toda la movilidad individual es direccionable a DiDi.",
+                             "Comparar disponibilidad, ETA, tarifa, conversion y cancelacion por franja antes de definir una campana.")
+    with cards[4]:
+        if locality is not None:
+            opportunity_card(f"Localidad para exploracion: {locality.categoria}",
+                             f"Es la localidad agregada con mayor participacion individual observada: {percent(locality.share_individual)}.",
+                             "La localidad puede servir para priorizar una prueba, no para estimar tamano de mercado.",
+                             "Validar cobertura, origen-destino, densidad de solicitudes y costo de adquisicion dentro de la localidad.")
+
+    st.subheader("Informacion adicional que DiDi necesitaria")
+    st.dataframe(pd.DataFrame([
+        ["Demanda real", "Solicitudes, viajes completados, conversion y frecuencia", "Comprobar si el patron de encuesta se convierte en uso."],
+        ["Contexto del viaje", "Origen-destino, distancia, duracion, motivo y hora", "Separar necesidad ocasional, commuting y ultima milla."],
+        ["Economia", "Tarifa, promociones, costo de adquisicion y margen", "Medir viabilidad comercial, no solo prevalencia."],
+        ["Experimento", "Grupo de comparacion y exposicion a la campana", "Estimar efecto incremental de una accion comercial."],
+    ], columns=["Pregunta", "Dato requerido", "Para que sirve"]), hide_index=True, width="stretch")
+
+    st.subheader("Ranking predictivo: Random Forest")
+    st.caption("La importancia indica contribucion predictiva dentro del modelo entrenado. No es causalidad, elasticidad ni ranking de clientes.")
+    ranking = pd.DataFrame([
+        [1, "Tenencia de automovil", "Acceso al vehiculo"],
+        [2, "Licencia de motocicleta", "Habilitacion para conducir moto"],
+        [3, "Licencia de automovil", "Habilitacion para conducir auto"],
+        [4, "Tenencia de motocicleta", "Acceso a moto"],
+        [5, "Numero de etapas", "Complejidad del trayecto"],
+    ], columns=["Posicion", "Caracteristica", "Lectura comercial prudente"])
+    st.dataframe(ranking, hide_index=True, width="stretch")
+    chart, notes = st.columns([1.25, 1])
+    with chart:
+        show_asset("importancia_rf.png", "Importancia por reduccion de impureza · Entrega 3 / MLflow")
+    with notes:
+        st.markdown("**Como usarlo.** Prioriza preguntas para segmentar y validar; no conviertas una variable importante en una causa ni en una audiencia de DiDi.")
+        st.markdown("**Limite.** El modelo clasifica transporte colectivo frente a individual motorizado; no identifica taxi, auto particular, moto o plataforma por separado.")
+    with st.expander("Figuras academicas de referencia · Entrega 3"):
+        show_asset("importancia_rl.png", "Coeficientes de regresion logistica · Entrega 3 / MLflow")
 
 
 def main():
@@ -412,7 +569,7 @@ def main():
     elif page == PAGES[3]:
         evaluation()
     elif page == PAGES[4]:
-        findings()
+        commercial_opportunities(frame, table, matrix)
     else:
         prediction_page()
 
