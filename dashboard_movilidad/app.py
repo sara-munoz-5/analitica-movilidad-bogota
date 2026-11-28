@@ -381,23 +381,33 @@ def best_category(table, field, contains=None):
     return None if data.empty else data.sort_values("share_individual", ascending=False).iloc[0]
 
 
-def opportunity_card(title, evidence, hypothesis, validation):
+def opportunity_card(title, question, evidence, action, validation):
     with st.container(border=True):
         st.subheader(title)
-        left, right = st.columns(2)
-        with left:
-            st.markdown("**Evidencia observada**")
+        st.caption(question)
+        evidence_col, action_col, validation_col = st.columns(3)
+        with evidence_col:
+            st.markdown("**Hallazgo observado**")
             st.write(evidence)
-            st.markdown("**Hipotesis comercial**")
-            st.write(hypothesis)
-        with right:
-            st.markdown("**Propuesta de validacion**")
+        with action_col:
+            st.markdown("**Posible accion de DiDi**")
+            st.write(action)
+        with validation_col:
+            st.markdown("**Como validar**")
             st.write(validation)
 
 
 def commercial_opportunities(frame, table, matrix):
     st.info("El transporte individual motorizado incluye automovil particular, motocicleta, taxi y plataformas. "
             "Esta pagina identifica patrones de movilidad, pero no estima usuarios ni demanda de DiDi.")
+    st.subheader("¿Qué puede hacer DiDi con esta herramienta?")
+    value_cards = st.columns(3)
+    value_cards[0].metric("1 · Entender", "Mercado de movilidad")
+    value_cards[0].caption("Leer patrones de Bogota mas alla de los usuarios actuales de la plataforma.")
+    value_cards[1].metric("2 · Comparar", "Segmentos")
+    value_cards[1].caption("Priorizar perfiles para investigaciones o pilotos comerciales.")
+    value_cards[2].metric("3 · Complementar", "Datos propios")
+    value_cards[2].caption("Cruzar la encuesta con demanda, tarifas, disponibilidad y campanas de DiDi.")
     if table is None:
         table = pd.concat([counts(frame, field).assign(variable=field) for field in FIELDS], ignore_index=True)
     explorer_table = table
@@ -435,7 +445,7 @@ def commercial_opportunities(frame, table, matrix):
                        f"oportunidades_{field}.csv")
     st.caption("Participacion dentro de cada categoria de la encuesta. No equivale a probabilidad de usar DiDi.")
 
-    st.subheader("Hipotesis respaldadas por la evidencia disponible")
+    st.subheader("Hipótesis respaldadas por la evidencia disponible")
     auto = best_category(table, "tiene_auto", "^No$")
     auto_yes = best_category(table, "tiene_auto", "^S")
     motive = best_category(table, "motivo_grupo")
@@ -444,39 +454,69 @@ def commercial_opportunities(frame, table, matrix):
     cards = st.tabs(["Sin auto", "Multiples etapas", "Motivos", "Franja", "Localidad"])
     with cards[0]:
         if auto is not None and auto_yes is not None:
+            auto_chart = share_table(table, "tiene_auto")
+            auto_chart["Colectivo"] = auto_chart[0].div(auto_chart["total"])
+            auto_chart["Individual motorizado"] = auto_chart["share_individual"]
+            chart_data = auto_chart.melt(id_vars="categoria", value_vars=["Colectivo", "Individual motorizado"],
+                                         var_name="Transporte", value_name="Proporcion")
+            chart = px.bar(chart_data, x="categoria", y="Proporcion", color="Transporte", barmode="group",
+                           text_auto=".1%", color_discrete_map=COLORS,
+                           labels={"categoria": "Tenencia de automovil", "Proporcion": "Participacion"})
+            chart.update_yaxes(range=[0, 1], tickformat=".0%")
+            show_chart(chart, 340, "hogares-con-sin-auto")
             opportunity_card(
                 "Movilidad individual ocasional en hogares sin automovil",
+                "\u00bfQue viajes individuales realizan hogares sin auto y en que contextos podria requerirse una alternativa?",
                 f"En la encuesta, los viajes individuales representan {percent(auto.share_individual)} en hogares sin auto, frente a {percent(auto_yes.share_individual)} en hogares con auto.",
-                "Los hogares sin auto podrian tener necesidades puntuales de transporte individual, sin que eso implique que ya sean usuarios de DiDi.",
+                "Investigar uso ocasional por segmento, sin asumir que el transporte individual observado ya es demanda de DiDi.",
                 "Medir solicitudes nuevas y recurrentes por tenencia de auto, origen-destino, hora, motivo y tarifa; comparar con hogares con auto.")
         else:
             st.info("No hay suficiente agregado publico para esta oportunidad.")
     with cards[1]:
         corr = matrix.at["Etapas", "Viaje individual"] if matrix is not None and "Etapas" in matrix.index else None
         evidence = (f"La correlacion publicada entre numero de etapas y viaje individual es {corr:.2f}; la asociacion es descriptiva y no prueba causalidad." if corr is not None else "El numero de etapas no esta publicado como distribucion publica; solo puede revisarse internamente.")
-        opportunity_card("Viajes colectivos con multiples etapas", evidence,
-                         "Los trayectos con transbordos podrian revelar necesidades de conexion o ultima milla.",
+        if corr is not None:
+            st.metric("Correlacion publicada con viaje individual", f"{corr:.2f}", border=True)
+            stage_chart = px.bar(pd.DataFrame({"Relacion": ["Etapas · individual"], "Correlacion": [corr]}),
+                                 x="Correlacion", y="Relacion", orientation="h",
+                                 color_discrete_sequence=[COLORS["Individual motorizado"]],
+                                 labels={"Correlacion": "Pearson", "Relacion": ""})
+            stage_chart.update_xaxes(range=[-1, 1], zeroline=True, zerolinewidth=2, zerolinecolor="#384252")
+            show_chart(stage_chart, 260, "etapas-correlacion")
+        opportunity_card("Viajes colectivos con multiples etapas",
+                         "\u00bfDonde aparecen viajes con varias etapas y que conexion podria complementar esa necesidad?",
+                         evidence,
+                         "Explorar conexiones o ultima milla donde los datos de ruta y disponibilidad indiquen friccion.",
                          "Usar datos de rutas, tiempos, solicitudes y abandono para medir si una oferta de conexion reduce friccion o aumenta viajes completados.")
     with cards[2]:
         if motive is not None:
+            st.metric("Mayor participacion individual observada", percent(motive.share_individual), border=True)
+            st.caption(f"Categoria destacada: {motive.categoria}")
             opportunity_card(f"Necesidad asociada al motivo: {motive.categoria}",
+                             "\u00bfQue motivos concentran mayor participacion individual y en que momentos conviene investigar el servicio?",
                              f"Es la categoria de motivo con mayor participacion individual observada: {percent(motive.share_individual)}.",
-                             "El motivo puede ayudar a priorizar mensajes y momentos de servicio, pero no identifica por si solo la intencion de compra.",
+                             "Priorizar mensajes o pilotos exploratorios por motivo, sin convertir el indicador en intencion de compra.",
                              "Contrastar motivo declarado con busquedas, solicitudes, conversion, hora y distancia en una prueba controlada.")
     with cards[3]:
         if time is not None:
+            st.metric("Mayor participacion individual observada", percent(time.share_individual), border=True)
+            st.caption(f"Franja destacada: {time.categoria}")
             opportunity_card(f"Ventana horaria: {time.categoria}",
+                             "\u00bfQue ventanas horarias muestran mayor movilidad individual para orientar cobertura?",
                              f"Es la franja con mayor participacion individual observada: {percent(time.share_individual)}.",
-                             "La franja podria orientar cobertura o comunicacion, sin asumir que toda la movilidad individual es direccionable a DiDi.",
+                             "Evaluar cobertura o comunicacion en esa franja, sin asumir que toda la movilidad individual es direccionable a DiDi.",
                              "Comparar disponibilidad, ETA, tarifa, conversion y cancelacion por franja antes de definir una campana.")
     with cards[4]:
         if locality is not None:
+            st.metric("Mayor participacion individual observada", percent(locality.share_individual), border=True)
+            st.caption(f"Localidad destacada: {locality.categoria}")
             opportunity_card(f"Localidad para exploracion: {locality.categoria}",
+                             "\u00bfQue localidades ameritan una investigacion comercial prioritaria?",
                              f"Es la localidad agregada con mayor participacion individual observada: {percent(locality.share_individual)}.",
-                             "La localidad puede servir para priorizar una prueba, no para estimar tamano de mercado.",
+                             "Priorizar una prueba de cobertura o investigacion zonal, no estimar tamano de mercado.",
                              "Validar cobertura, origen-destino, densidad de solicitudes y costo de adquisicion dentro de la localidad.")
 
-    st.subheader("Informacion adicional que DiDi necesitaria")
+    st.subheader("Información adicional que DiDi necesitaría")
     st.dataframe(pd.DataFrame([
         ["Demanda real", "Solicitudes, viajes completados, conversion y frecuencia", "Comprobar si el patron de encuesta se convierte en uso."],
         ["Contexto del viaje", "Origen-destino, distancia, duracion, motivo y hora", "Separar necesidad ocasional, commuting y ultima milla."],
@@ -484,7 +524,21 @@ def commercial_opportunities(frame, table, matrix):
         ["Experimento", "Grupo de comparacion y exposicion a la campana", "Estimar efecto incremental de una accion comercial."],
     ], columns=["Pregunta", "Dato requerido", "Para que sirve"]), hide_index=True, width="stretch")
 
+    st.subheader("De inteligencia de movilidad a inteligencia comercial integrada")
+    st.caption("Propuesta futura: no hay conexion con datos de DiDi ni indicadores comerciales simulados en esta version.")
+    future = st.columns(4)
+    future[0].markdown("### 1\nEncuesta Bogotá 2023")
+    future[0].caption("Patrones de movilidad y segmentos")
+    future[1].markdown("### +\nSolicitudes DiDi")
+    future[1].caption("Demanda efectiva y viajes completados")
+    future[2].markdown("### +\nTarifas y disponibilidad")
+    future[2].caption("Oferta, ETA y condiciones de servicio")
+    future[3].markdown("### →\nCampanas evaluadas")
+    future[3].caption("Incrementalidad, conversion y margen")
+    st.success("Evolucion objetivo: pasar de comprender patrones a evaluar demanda y acciones comerciales con evidencia propia.")
+
     st.subheader("Ranking predictivo: Random Forest")
+    st.divider()
     st.caption("La importancia indica contribucion predictiva dentro del modelo entrenado. No es causalidad, elasticidad ni ranking de clientes.")
     ranking = pd.DataFrame([
         [1, "Tenencia de automovil", "Acceso al vehiculo"],
@@ -521,6 +575,10 @@ def main():
         st.caption("Encuesta de Movilidad 2023")
         page = st.radio("Navegación", PAGES, label_visibility="collapsed")
         st.divider()
+        if page in (PAGES[0], PAGES[2], PAGES[4]):
+            st.caption("Los filtros globales actualizan indicadores y descriptivos compatibles.")
+        else:
+            st.caption("Resultados fijos del entrenamiento o entradas independientes.")
         st.caption("Parquet locales" if private_dir else "Datos agregados · vista pública")
     with st.container(key="executive_header"):
         st.markdown('<div class="source">BOGOTÁ 2023 · ESTRATEGIA COMERCIAL DIDI</div>',
